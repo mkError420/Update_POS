@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
+import Adjustments from './Adjustments';
 
 const API_BASE_URL = 'http://localhost:5000/api';
 
 export default function Inventory() {
   const userObj = JSON.parse(localStorage.getItem('user') || '{}');
   const isSuperAdmin = userObj.role === 'super_admin';
+
+  // Tab navigation state
+  const [activeTab, setActiveTab] = useState('inventory');
 
   const [products, setProducts] = useState([]);
   const [currentPage, setCurrentPage] = useState(1);
@@ -299,24 +303,51 @@ export default function Inventory() {
         </div>
       )}
 
-      {/* Title Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Inventory Catalog</h2>
-          <p className="text-sm text-slate-500">Manage shop items, monitor levels, and set restock alerts</p>
-        </div>
-        <div className="flex items-center space-x-3 w-full sm:w-auto">
-          <button
-            onClick={exportToCSV}
-            className="bg-white hover:bg-slate-50 text-slate-700 font-semibold py-2.5 px-5 border border-slate-200 rounded-xl text-sm shadow-xs transition-colors flex items-center space-x-2"
-          >
-            <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
-            <span>Export Catalog</span>
-          </button>
-        </div>
+      {/* Tab Navigation */}
+      <div className="flex space-x-1 bg-slate-100 p-1 rounded-xl">
+        <button
+          onClick={() => setActiveTab('inventory')}
+          className={`flex-1 py-2.5 px-4 rounded-lg text-sm font-semibold transition-all ${
+            activeTab === 'inventory'
+              ? 'bg-white text-indigo-600 shadow-sm'
+              : 'text-slate-600 hover:text-slate-800'
+          }`}
+        >
+          Inventory Catalog
+        </button>
+        <button
+          onClick={() => setActiveTab('adjustments')}
+          className={`flex-1 py-2.5 px-4 rounded-lg text-sm font-semibold transition-all ${
+            activeTab === 'adjustments'
+              ? 'bg-white text-indigo-600 shadow-sm'
+              : 'text-slate-600 hover:text-slate-800'
+          }`}
+        >
+          Adjustments
+        </button>
       </div>
+
+      {/* Inventory Tab Content */}
+      {activeTab === 'inventory' && (
+        <>
+          {/* Title Header */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-800">Inventory Catalog</h2>
+              <p className="text-sm text-slate-500">Manage shop items, monitor levels, and set restock alerts</p>
+            </div>
+            <div className="flex items-center space-x-3 w-full sm:w-auto">
+              <button
+                onClick={exportToCSV}
+                className="bg-white hover:bg-slate-50 text-slate-700 font-semibold py-2.5 px-5 border border-slate-200 rounded-xl text-sm shadow-xs transition-colors flex items-center space-x-2"
+              >
+                <svg className="w-5 h-5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                <span>Export Catalog</span>
+              </button>
+            </div>
+          </div>
  
       {/* Filter and Search Bar */}
       <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xs">
@@ -969,6 +1000,13 @@ export default function Inventory() {
             </form>
           </div>
         </div>
+      )}
+      </>
+      )}
+
+      {/* Adjustments Tab Content */}
+      {activeTab === 'adjustments' && (
+        <Adjustments />
       )}
 
     </div>

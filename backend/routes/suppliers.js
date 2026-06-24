@@ -426,7 +426,7 @@ router.put('/purchase-orders/:id/status', authorize(['shop_admin']), async (req,
           const newCost = parseFloat(cost_price);
 
           await conn.query(
-            `INSERT INTO cost_price_logs (shop_id, product_id, supplier_id, old_cost_price, new_cost_price, change_reason)
+            `INSERT INTO cost_price_logs (shop_id, product_id, supplier_id, old_cost_price, new_cost_price, reason)
              VALUES (?, ?, ?, ?, ?, ?)`,
             [shopId, product_id, po.supplier_id, oldCost, newCost, `PO Received #${poId}`]
           );
