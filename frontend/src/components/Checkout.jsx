@@ -1,14 +1,30 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 
-// Simulated base URL for API requests
 const API_BASE_URL = 'http://localhost:5000/api';
+
+const createNewSaleTab = (index) => ({
+  id: Date.now() + index, // Unique ID for the tab
+  name: `Sale ${index}`,
+  cart: [],
+  selectedCustomerId: '',
+  customerName: '',
+  customerPhone: '',
+  customerAddress: '',
+  syncToDirectory: true,
+  discountPercent: 0,
+  paymentMethod: 'cash',
+  paidAmount: '',
+  isPaidTouched: false,
+  reduceDueAmount: 0,
+});
 
 export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill = null, onClearResumedHeldBill = () => {} }) {
   // --- STATE MANAGEMENT ---
   const [products, setProducts] = useState([]);
   const [customers, setCustomers] = useState([]);
-  const [cart, setCart] = useState([]);
+  const [saleTabs, setSaleTabs] = useState([createNewSaleTab(1)]);
+  const [activeTabId, setActiveTabId] = useState(saleTabs[0].id);
   const [search, setSearch] = useState('');
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [customerName, setCustomerName] = useState('');
@@ -16,11 +32,8 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
   const [customerAddress, setCustomerAddress] = useState('');
   const [syncToDirectory, setSyncToDirectory] = useState(true);
   const [currentUser, setCurrentUser] = useState(null);
-  const [discountPercent, setDiscountPercent] = useState(0);
   const [taxRate, setTaxRate] = useState(0.10); // Dynamic Tax Rate (default 10%)
-  const [paymentMethod, setPaymentMethod] = useState('cash');
-  const [paidAmount, setPaidAmount] = useState('');
-  const [isPaidTouched, setIsPaidTouched] = useState(false);
+
   const [reduceDueAmount, setReduceDueAmount] = useState(0);
   
   // UI States
@@ -38,6 +51,10 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
   const [holdNotes, setHoldNotes] = useState('');
   const [holdingBill, setHoldingBill] = useState(false);
 
+  // Derived active tab state
+  const activeTabIndex = saleTabs.findIndex(t => t.id === activeTabId);
+  const activeTab = saleTabs[activeTabIndex];
+
   // Decode/parse current user details on start
   useEffect(() => {
     try {
@@ -50,21 +67,30 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
     }
   }, []);
 
+  // When active tab changes, sync its details to the local form state
+  useEffect(() => {
+    if (activeTab) {
+      setSelectedCustomerId(activeTab.selectedCustomerId);
+      setCustomerName(activeTab.customerName);
+      setCustomerPhone(activeTab.customerPhone);
+      setCustomerAddress(activeTab.customerAddress);
+      setSyncToDirectory(activeTab.syncToDirectory);
+      setReduceDueAmount(activeTab.reduceDueAmount);
+    }
+  }, [activeTabId, saleTabs]);
+
   // Sync details input form fields when selection dropdown changes
   useEffect(() => {
-    if (selectedCustomerId !== '') {
-      const selected = customers.find(c => c.id === parseInt(selectedCustomerId));
-      if (selected) {
-        setCustomerName(selected.name || '');
-        setCustomerPhone(selected.phone || '');
-        setCustomerAddress(selected.address || '');
-        setSyncToDirectory(false); // Do not sync updates by default
-      }
+    const selected = customers.find(c => c.id === parseInt(selectedCustomerId));
+    if (selected) {
+      updateActiveTabState('customerName', selected.name || '');
+      updateActiveTabState('customerPhone', selected.phone || '');
+      updateActiveTabState('customerAddress', selected.address || '');
+      updateActiveTabState('syncToDirectory', false);
     } else {
-      setCustomerName('');
-      setCustomerPhone('');
-      setCustomerAddress('');
-      setSyncToDirectory(true); // Save new profiles to directory by default
+      updateActiveTabState('customerName', '');
+      updateActiveTabState('customerPhone', '');
+      updateActiveTabState('customerAddress', '');
     }
   }, [selectedCustomerId, customers]);
 
@@ -181,10 +207,10 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
 
   // Automatically sync paidAmount with final total unless cashier manually edited it
   useEffect(() => {
-    if (!isPaidTouched) {
-      setPaidAmount(getFinalTotal().toFixed(2));
+    if (!activeTab?.isPaidTouched) {
+      updateActiveTabState('paidAmount', getFinalTotal().toFixed(2));
     }
-  }, [cart, discountPercent, taxRate, isPaidTouched]);
+  }, [activeTab?.cart, activeTab?.discountPercent, taxRate, activeTab?.isPaidTouched]);
 
   // --- HELPER FUNCTIONS ---
   
@@ -201,6 +227,16 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
     }, 500);
   };
 
+  const updateActiveTabState = (field, value) => {
+    setSaleTabs(prevTabs => {
+      const newTabs = [...prevTabs];
+      const tabIndex = newTabs.findIndex(t => t.id === activeTabId);
+      if (tabIndex > -1) {
+        newTabs[tabIndex] = { ...newTabs[tabIndex], [field]: value };
+      }
+      return newTabs;
+    });
+  };
   // 3. Cart State Modifications
   const addToCart = (product) => {
     if (product.stock_quantity <= 0) {
@@ -208,24 +244,24 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
       return;
     }
 
-    const existingIndex = cart.findIndex(item => item.id === product.id);
+    const existingIndex = activeTab.cart.findIndex(item => item.id === product.id);
 
     if (existingIndex > -1) {
-      const currentQty = cart[existingIndex].quantity;
+      const currentQty = activeTab.cart[existingIndex].quantity;
       if (currentQty >= product.stock_quantity) {
         triggerAlert('error', `Cannot exceed available inventory limit (${product.stock_quantity}) for "${product.name}".`);
         return;
       }
-      const updatedCart = [...cart];
+      const updatedCart = [...activeTab.cart];
       updatedCart[existingIndex].quantity += 1;
-      setCart(updatedCart);
+      updateActiveTabState('cart', updatedCart);
     } else {
-      setCart([...cart, { ...product, quantity: 1 }]);
+      updateActiveTabState('cart', [...activeTab.cart, { ...product, quantity: 1 }]);
     }
   };
 
   const updateQuantity = (productId, change) => {
-    const targetItem = cart.find(item => item.id === productId);
+    const targetItem = activeTab.cart.find(item => item.id === productId);
     if (!targetItem) return;
 
     const newQty = targetItem.quantity + change;
@@ -240,14 +276,14 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
       return;
     }
 
-    setCart(cart.map(item => 
+    updateActiveTabState('cart', activeTab.cart.map(item =>
       item.id === productId ? { ...item, quantity: newQty } : item
     ));
   };
 
   const handleQuantityInput = (productId, valStr) => {
     let parsedVal = parseInt(valStr, 10);
-    const targetItem = cart.find(item => item.id === productId);
+    const targetItem = activeTab.cart.find(item => item.id === productId);
     if (!targetItem) return;
 
     if (valStr === '') {
@@ -261,7 +297,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
       parsedVal = targetItem.stock_quantity;
     }
 
-    setCart(cart.map(item => 
+    updateActiveTabState('cart', activeTab.cart.map(item =>
       item.id === productId ? { ...item, quantity: parsedVal } : item
     ));
   };
@@ -273,24 +309,24 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
   };
 
   const removeFromCart = (productId) => {
-    setCart(cart.filter(item => item.id !== productId));
+    updateActiveTabState('cart', activeTab.cart.filter(item => item.id !== productId));
   };
 
   // Financial Calculators
-  const getSubtotal = () => cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  const getSubtotal = () => activeTab.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   const getTax = () => getSubtotal() * taxRate;
-  const getDiscountAmount = () => getSubtotal() * (parseFloat(discountPercent || 0) / 100);
+  const getDiscountAmount = () => getSubtotal() * (parseFloat(activeTab.discountPercent || 0) / 100);
   const getFinalTotal = () => (getSubtotal() - getDiscountAmount()) + getTax() + parseFloat(reduceDueAmount || 0);
 
   // --- SUBMIT CHECKOUT ---
   const handleCheckout = async () => {
-    if (cart.length === 0 && parseFloat(reduceDueAmount || 0) <= 0) {
+    if (activeTab.cart.length === 0 && parseFloat(reduceDueAmount || 0) <= 0) {
       triggerAlert('error', 'Checkout cart is empty.');
       return;
     }
 
     const finalTotal = getFinalTotal();
-    const parsedPaid = paidAmount !== '' ? parseFloat(paidAmount) : finalTotal;
+    const parsedPaid = activeTab.paidAmount !== '' ? parseFloat(activeTab.paidAmount) : finalTotal;
     const dueAmount = finalTotal - parsedPaid;
 
     if (parsedPaid < 0) {
@@ -299,7 +335,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
     }
 
     if (dueAmount > 0) {
-      const hasProfile = selectedCustomerId !== '' || (customerName.trim() !== '' && syncToDirectory);
+      const hasProfile = activeTab.selectedCustomerId !== '' || (activeTab.customerName.trim() !== '' && activeTab.syncToDirectory);
       if (!hasProfile) {
         triggerAlert('error', 'Customer profile selection is required to record outstanding due balance.');
         return;
@@ -309,10 +345,10 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
     setSubmitting(true);
     try {
       const token = localStorage.getItem('token');
-      let finalCustomerId = selectedCustomerId ? parseInt(selectedCustomerId) : null;
+      let finalCustomerId = activeTab.selectedCustomerId ? parseInt(activeTab.selectedCustomerId) : null;
 
       // 1. Sync Customer Details to Customer Directory if requested
-      if (syncToDirectory && (customerName.trim() !== '' || selectedCustomerId !== '')) {
+      if (activeTab.syncToDirectory && (activeTab.customerName.trim() !== '' || activeTab.selectedCustomerId !== '')) {
         if (selectedCustomerId === '') {
           // Add new customer profile
           if (!customerName.trim()) {
@@ -325,9 +361,9 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
               'Authorization': `Bearer ${token}`
             },
             body: JSON.stringify({
-              name: customerName.trim(),
-              phone: customerPhone.trim() || null,
-              address: customerAddress.trim() || null
+              name: activeTab.customerName.trim(),
+              phone: activeTab.customerPhone.trim() || null,
+              address: activeTab.customerAddress.trim() || null
             })
           });
           const customerData = await customerRes.json();
@@ -347,9 +383,9 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
               'Authorization': `Bearer ${token}`
             },
             body: JSON.stringify({
-              name: customerName.trim(),
-              phone: customerPhone.trim() || null,
-              address: customerAddress.trim() || null
+              name: activeTab.customerName.trim(),
+              phone: activeTab.customerPhone.trim() || null,
+              address: activeTab.customerAddress.trim() || null
             })
           });
           const customerData = await customerRes.json();
@@ -367,10 +403,10 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
         customer_id: finalCustomerId,
         discount: getDiscountAmount(),
         tax: getTax(),
-        payment_method: paymentMethod,
+        payment_method: activeTab.paymentMethod,
         paid_amount: parsedPaid,
         reduce_due_amount: parseFloat(reduceDueAmount || 0),
-        items: cart.map(item => ({
+        items: activeTab.cart.map(item => ({
           product_id: item.id,
           quantity: item.quantity
         }))
@@ -393,20 +429,20 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
 
       // Calculate paid and outstanding due amounts
       const finalTotal = getFinalTotal();
-      const paid = paidAmount !== '' ? parseFloat(paidAmount) : finalTotal;
+      const paid = activeTab.paidAmount !== '' ? parseFloat(activeTab.paidAmount) : finalTotal;
       const outstandingDue = finalTotal - paid;
 
       // Successful Checkout routine
       setReceipt({
         sale_id: data.sale_id,
-        items: [...cart],
+        items: [...activeTab.cart],
         subtotal: getSubtotal(),
         discount: payload.discount,
         tax: payload.tax,
         total: data.final_amount,
-        payment_method: paymentMethod,
+        payment_method: activeTab.paymentMethod,
         created_at: new Date().toLocaleString(),
-        customer_name: customerName.trim() || 'Walk-in Customer',
+        customer_name: activeTab.customerName.trim() || 'Walk-in Customer',
         customer_phone: customerPhone.trim() || '',
         customer_address: customerAddress.trim() || '',
         shop_name: currentUser?.shop_name || 'Boutique POS',
@@ -427,18 +463,13 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
         triggerAlert('success', 'Checkout transaction completed successfully!');
       }
 
-      // Flush States
-      setCart([]);
-      setDiscountPercent(0);
-      setSelectedCustomerId('');
-      setCustomerName('');
-      setCustomerPhone('');
-      setCustomerAddress('');
-      setSyncToDirectory(true);
+      // Reset the completed tab
+      setSaleTabs(prev => {
+        const newTabs = [...prev];
+        newTabs[activeTabIndex] = createNewSaleTab(activeTabIndex + 1);
+        return newTabs;
+      });
       setMobileCartOpen(false);
-      setIsPaidTouched(false);
-      setPaidAmount('');
-      setReduceDueAmount(0);
       
       // Refresh local product stock list
       fetchProducts(search);
@@ -454,7 +485,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
 
   const handleHoldBillSubmit = async (e) => {
     e.preventDefault();
-    if (cart.length === 0) {
+    if (activeTab.cart.length === 0) {
       triggerAlert('error', 'Cart is empty. Nothing to hold.');
       return;
     }
@@ -462,16 +493,16 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
     setHoldingBill(true);
     try {
       const token = localStorage.getItem('token');
-      let finalCustomerId = selectedCustomerId ? parseInt(selectedCustomerId) : null;
+      let finalCustomerId = activeTab.selectedCustomerId ? parseInt(activeTab.selectedCustomerId) : null;
 
-      const payloadItems = cart.map(item => ({
+      const payloadItems = activeTab.cart.map(item => ({
         product_id: item.id,
         quantity: item.quantity
       }));
 
       const payload = {
         customer_id: finalCustomerId,
-        customer_name: customerName.trim() || null,
+        customer_name: activeTab.customerName.trim() || null,
         customer_phone: customerPhone.trim() || null,
         customer_address: customerAddress.trim() || null,
         discount_percent: discountPercent,
@@ -493,19 +524,14 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
 
       triggerAlert('success', 'Bill held successfully!');
       
-      // Reset cart and info
-      setCart([]);
-      setDiscountPercent(0);
-      setSelectedCustomerId('');
-      setCustomerName('');
-      setCustomerPhone('');
-      setCustomerAddress('');
-      setSyncToDirectory(true);
+      // Reset the current tab
+      setSaleTabs(prev => {
+        const newTabs = [...prev];
+        newTabs[activeTabIndex] = createNewSaleTab(activeTabIndex + 1);
+        return newTabs;
+      });
       setHoldNotes('');
       setShowHoldBillModal(false);
-      setIsPaidTouched(false);
-      setPaidAmount('');
-      setReduceDueAmount(0);
 
       // Refresh list
       fetchHeldBills();
@@ -517,7 +543,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
   };
 
   const handleResumeHeldBill = async (heldBill) => {
-    if (cart.length > 0) {
+    if (activeTab.cart.length > 0) {
       if (!window.confirm('Resuming will overwrite your current active cart. Proceed?')) {
         return;
       }
@@ -582,21 +608,15 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
         triggerAlert('success', 'Held cart successfully resumed!');
       }
 
-      setCart(reconstructedCart);
-      setDiscountPercent(parseFloat(heldBill.discount_percent || 0));
-      setReduceDueAmount(parseFloat(heldBill.due_amount || 0));
-      
-      if (heldBill.customer_id) {
-        setSelectedCustomerId(heldBill.customer_id);
-      } else {
-        setSelectedCustomerId('');
-        setCustomerName(heldBill.customer_name || '');
-        setCustomerPhone(heldBill.customer_phone || '');
-        setCustomerAddress(heldBill.customer_address || '');
-      }
-
-      setIsPaidTouched(false);
-      setPaidAmount('');
+      updateActiveTabState('cart', reconstructedCart);
+      updateActiveTabState('discountPercent', parseFloat(heldBill.discount_percent || 0));
+      updateActiveTabState('reduceDueAmount', parseFloat(heldBill.due_amount || 0));
+      updateActiveTabState('selectedCustomerId', heldBill.customer_id || '');
+      updateActiveTabState('customerName', heldBill.customer_name || '');
+      updateActiveTabState('customerPhone', heldBill.customer_phone || '');
+      updateActiveTabState('customerAddress', heldBill.customer_address || '');
+      updateActiveTabState('isPaidTouched', false);
+      updateActiveTabState('paidAmount', '');
 
       const token = localStorage.getItem('token');
       await fetch(`${API_BASE_URL}/held-bills/${heldBill.id}`, {
@@ -627,6 +647,26 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
       fetchHeldBills();
     } catch (err) {
       triggerAlert('error', err.message);
+    }
+  };
+
+  const addSaleTab = () => {
+    const newTab = createNewSaleTab(saleTabs.length + 1);
+    setSaleTabs([...saleTabs, newTab]);
+    setActiveTabId(newTab.id);
+  };
+
+  const closeSaleTab = (tabIdToClose) => {
+    if (saleTabs.length <= 1) {
+      triggerAlert('error', 'Cannot close the last sale tab.');
+      return;
+    }
+    const tabIndexToClose = saleTabs.findIndex(t => t.id === tabIdToClose);
+    const newTabs = saleTabs.filter(t => t.id !== tabIdToClose);
+    setSaleTabs(newTabs);
+
+    if (activeTabId === tabIdToClose) {
+      setActiveTabId(newTabs[Math.max(0, tabIndexToClose - 1)].id);
     }
   };
 
@@ -667,6 +707,36 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
         </div>
       </div>
 
+      {/* 3. Tabs Bar */}
+      <div className="mb-4 border-b border-slate-200 flex items-center space-x-1">
+        {saleTabs.map(tab => (
+          <div
+            key={tab.id}
+            className={`flex items-center space-x-2 py-2 px-4 border-b-2 cursor-pointer transition-all duration-200 ${
+              activeTabId === tab.id
+                ? 'border-indigo-600 text-indigo-600 font-semibold bg-indigo-50/50'
+                : 'border-transparent text-slate-500 hover:bg-slate-100'
+            }`}
+            onClick={() => setActiveTabId(tab.id)}
+          >
+            <span>{tab.name}</span>
+            <button
+              onClick={(e) => { e.stopPropagation(); closeSaleTab(tab.id); }}
+              className="text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded-full p-0.5"
+              disabled={saleTabs.length <= 1}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+        ))}
+        <button
+          onClick={addSaleTab}
+          className="ml-2 text-slate-500 hover:bg-slate-200 rounded-full p-2 transition-colors"
+          title="Add New Sale Tab"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" /></svg>
+        </button>
+      </div>
       {/* 3. Split Screen Flex Layout */}
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-6 overflow-hidden min-h-0">
         
@@ -703,7 +773,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="border-b border-slate-100 text-xs font-bold text-slate-400 uppercase tracking-wider bg-slate-50/50">
-                        <th className="p-3 pl-4">SKU</th>
+                        <th className="p-3 pl-4 w-24">SKU</th>
                         <th className="p-3">Product Name</th>
                         <th className="p-3 text-right">Price</th>
                         <th className="p-3 text-center">Stock</th>
@@ -712,7 +782,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-sm">
                       {products.map((product) => {
-                        const inCartItem = cart.find(item => item.id === product.id);
+                        const inCartItem = activeTab.cart.find(item => item.id === product.id);
                         const remainingQty = product.stock_quantity - (inCartItem ? inCartItem.quantity : 0);
                         const isOutOfStock = remainingQty <= 0;
 
@@ -794,7 +864,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
         <div>
           <p className="text-xs text-slate-400 font-medium">Active Cart</p>
           <p className="text-lg font-bold text-slate-800">
-            {cart.reduce((sum, item) => sum + item.quantity, 0)} Items - <span className="text-indigo-600">৳{getFinalTotal().toFixed(2)}</span>
+            {activeTab.cart.reduce((sum, item) => sum + item.quantity, 0)} Items - <span className="text-indigo-600">৳{getFinalTotal().toFixed(2)}</span>
           </p>
         </div>
         <button
@@ -834,7 +904,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
       {receipt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
           <div className="bg-white rounded-2xl max-w-4xl w-full shadow-2xl overflow-hidden flex flex-col md:flex-row max-h-[90vh]">
-            
+
             {/* Left Side: Receipt Live Preview Canvas */}
             <div className="flex-1 bg-slate-100 p-6 flex flex-col items-center justify-center overflow-y-auto min-h-0">
               <div className="w-full flex justify-between items-center mb-4">
@@ -843,7 +913,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                   {previewMode === 'thermal' ? 'Thermal 80mm Roll' : 'Regular A4 Sheet'}
                 </span>
               </div>
-              
+
               <div className="w-full py-4 flex justify-center items-start min-h-0 overflow-y-auto">
                 {previewMode === 'thermal' ? (
                   /* Thermal Receipt Mockup */
@@ -855,7 +925,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                       {receipt.shop_email && <p className="text-[10px] text-slate-500">Email: {receipt.shop_email}</p>}
                       <p className="text-[9px] text-slate-400 mt-2 font-sans tracking-widest">*** TRANSACTION RECEIPT ***</p>
                     </div>
-                    
+
                     <div className="border-b border-dashed border-slate-300 py-2 my-2 text-[10px] space-y-0.5 text-slate-600">
                       <div><span className="font-semibold text-slate-800">Sale ID:</span> #{receipt.sale_id}</div>
                       <div><span className="font-semibold text-slate-800">Date:</span> {receipt.created_at}</div>
@@ -1041,7 +1111,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                   <span className="text-sm font-bold tracking-tight">Checkout Completed</span>
                 </div>
                 
-                <h3 className="text-lg font-extrabold text-slate-800">Print Receipt</h3>
+                <h3 className="text-lg font-extrabold text-slate-800">Print Receipt for {activeTab.name}</h3>
                 <p className="text-xs text-slate-500 mt-1">Transaction recorded successfully. Preview and choose formatting layout below:</p>
 
                 {/* Print Layout Selector */}
@@ -1050,14 +1120,14 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                   <div className="grid grid-cols-2 gap-2 bg-slate-200/60 p-1 rounded-xl">
                     <button
                       type="button"
-                      onClick={() => setPreviewMode('thermal')}
+                      onClick={() => { setPreviewMode('thermal'); }}
                       className={`py-2 text-xs font-semibold rounded-lg transition-all ${
                         previewMode === 'thermal' 
                           ? 'bg-white text-indigo-700 shadow-sm' 
                           : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/50'
                       }`}
                     >
-                      Thermal (80mm)
+                      Thermal (80mm) 
                     </button>
                     <button
                       type="button"
@@ -1068,7 +1138,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                           : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/50'
                       }`}
                     >
-                      Regular (A4)
+                      Regular (A4) 
                     </button>
                   </div>
                 </div>
@@ -1311,7 +1381,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
       {showHoldBillModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl overflow-hidden flex flex-col">
-            <div className="flex justify-between items-center pb-3 border-b border-slate-100">
+            <div className="flex justify-between items-center pb-3 border-b border-slate-100 ">
               <h3 className="text-lg font-bold text-slate-800">Hold Current Bill</h3>
               <button onClick={() => setShowHoldBillModal(false)} className="text-slate-400 hover:text-slate-600">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1319,7 +1389,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                 </svg>
               </button>
             </div>
-            
+
             <form onSubmit={handleHoldBillSubmit} className="mt-4 space-y-4">
               <div>
                 <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
@@ -1338,7 +1408,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
               <div className="bg-slate-50 rounded-xl p-3 text-xs text-slate-500 space-y-1">
                 <div className="flex justify-between font-semibold text-slate-700">
                   <span>Cart Items Count:</span>
-                  <span>{cart.reduce((sum, item) => sum + item.quantity, 0)}</span>
+                  <span>{activeTab.cart.reduce((sum, item) => sum + item.quantity, 0)}</span>
                 </div>
                 <div className="flex justify-between font-semibold text-slate-700">
                   <span>Subtotal Amount:</span>
@@ -1346,7 +1416,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                 </div>
                 {selectedCustomerId && (
                   <div className="flex justify-between">
-                    <span>Customer:</span>
+                    <span>Customer: </span>
                     <span>{customerName}</span>
                   </div>
                 )}
@@ -1362,7 +1432,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                 </button>
                 <button
                   type="submit"
-                  disabled={holdingBill || !holdNotes.trim()}
+                  disabled={holdingBill || !holdNotes.trim() || activeTab.cart.length === 0}
                   className="px-5 py-2 bg-amber-500 hover:bg-amber-600 disabled:bg-slate-300 text-white rounded-xl text-sm font-semibold transition-colors shadow flex items-center space-x-1.5"
                 >
                   {holdingBill ? (
@@ -1391,7 +1461,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                 <h3 className="text-lg font-bold text-slate-800">Resume Held Bills</h3>
                 <p className="text-xs text-slate-400 mt-0.5">Select a suspended cart to load back into checkout</p>
               </div>
-              <button 
+              <button
                 type="button"
                 onClick={() => setShowHeldBillsModal(false)} 
                 className="text-slate-400 hover:text-slate-600"
@@ -1422,7 +1492,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                     const isDueTracker = itemsList.length === 0;
 
                     return (
-                      <div 
+                      <div
                         key={bill.id} 
                         className="p-4 border border-slate-200 rounded-xl hover:border-indigo-300 transition-colors bg-slate-50/50 flex flex-col sm:flex-row justify-between sm:items-center gap-4 text-left"
                       >
@@ -1504,14 +1574,14 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
   function renderCartPanelContent() {
     return (
       <div className="flex flex-col h-full overflow-hidden">
-        
+
         {/* Customer & Cart items header */}
         <div className="p-4 border-b border-slate-100 bg-slate-50 space-y-3">
           <div>
             <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
               Select Customer
             </label>
-            <select
+            <select 
               value={selectedCustomerId}
               onChange={(e) => setSelectedCustomerId(e.target.value)}
               className="w-full bg-white border border-slate-200 rounded-lg p-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-indigo-500"
@@ -1534,7 +1604,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
               Customer Details
             </h4>
 
-            {selectedCustomerId && (() => {
+            {activeTab.selectedCustomerId && (() => {
               const selected = customers.find(c => c.id === parseInt(selectedCustomerId));
               const balance = parseFloat(selected?.due_balance || 0);
               if (balance > 0) {
@@ -1547,7 +1617,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
               }
               return null;
             })()}
-            
+
             <div className="grid grid-cols-1 gap-2">
               <div>
                 <input
@@ -1566,7 +1636,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                   value={customerPhone}
                   onChange={(e) => {
                     setCustomerPhone(e.target.value);
-                    if (selectedCustomerId !== '') {
+                    if (activeTab.selectedCustomerId !== '') {
                       setSelectedCustomerId('');
                     }
                   }}
@@ -1574,7 +1644,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                 />
 
                 {/* Autocomplete Customer Suggestions */}
-                {selectedCustomerId === '' && customerPhone.trim() !== '' && (() => {
+                {activeTab.selectedCustomerId === '' && customerPhone.trim() !== '' && (() => {
                   const query = customerPhone.replace(/[^0-9]/g, '');
                   const suggestions = customers.filter(c => 
                     c.phone && c.phone.replace(/[^0-9]/g, '').includes(query)
@@ -1614,10 +1684,10 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
             </div>
 
             {/* Checkbox for saving / syncing to database */}
-            {((selectedCustomerId === '' && customerName.trim() !== '') || 
-              (selectedCustomerId !== '' && (
+            {((activeTab.selectedCustomerId === '' && customerName.trim() !== '') ||
+              (activeTab.selectedCustomerId !== '' && (
                 (() => {
-                  const selected = customers.find(c => c.id === parseInt(selectedCustomerId));
+                  const selected = customers.find(c => c.id === parseInt(activeTab.selectedCustomerId));
                   return selected && (
                     customerName !== (selected.name || '') ||
                     customerPhone !== (selected.phone || '') ||
@@ -1633,7 +1703,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                   className="w-3.5 h-3.5 text-indigo-600 border-slate-300 rounded focus:ring-indigo-500"
                 />
                 <span className="text-xs text-indigo-600 font-medium">
-                  {selectedCustomerId === '' 
+                  {activeTab.selectedCustomerId === ''
                     ? 'Save as new customer in directory' 
                     : 'Sync profile updates to directory'}
                 </span>
@@ -1644,7 +1714,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
 
         {/* Selected products scrollpane */}
         <div className="flex-1 overflow-y-auto p-4 divide-y divide-slate-100 min-h-0">
-          {cart.length === 0 ? (
+          {activeTab.cart.length === 0 ? (
             <div className="h-full flex flex-col justify-center items-center text-slate-400 py-12">
               <svg className="w-10 h-10 mb-2 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
@@ -1652,7 +1722,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
               <p className="text-sm font-medium">Cart is empty</p>
             </div>
           ) : (
-            cart.map((item) => (
+            activeTab.cart.map((item) => (
               <div key={item.id} className="py-3 flex items-center justify-between first:pt-0 last:pb-0">
                 <div className="min-w-0 pr-3">
                   <h4 className="text-sm font-semibold text-slate-800 truncate">{item.name}</h4>
@@ -1702,7 +1772,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
         </div>
 
         {/* Calculation summary + Pay trigger button */}
-        <div className="p-4 border-t border-slate-100 bg-slate-50 space-y-3 shrink-0">
+        <div className="p-4 border-t border-slate-100 bg-slate-50 space-y-3 shrink-0 ">
           <div className="space-y-1.5 text-xs text-slate-600">
             <div className="flex justify-between">
               <span>Subtotal</span>
@@ -1717,8 +1787,8 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                 min="0"
                 max="100"
                 step="0.1"
-                value={discountPercent}
-                onChange={(e) => setDiscountPercent(Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
+                value={activeTab.discountPercent}
+                onChange={(e) => updateActiveTabState('discountPercent', Math.min(100, Math.max(0, parseFloat(e.target.value) || 0)))}
                 className="w-20 border border-slate-200 rounded px-1.5 py-0.5 text-right font-medium text-slate-700 bg-white"
               />
             </div>
@@ -1758,7 +1828,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                 </div>
               </div>
             )}
-            
+
             <div className="flex justify-between text-base font-extrabold text-slate-800 border-t border-slate-200/60 pt-2">
               <span>Final Total</span>
               <span className="text-indigo-600">৳{getFinalTotal().toFixed(2)}</span>
@@ -1771,19 +1841,19 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                 type="number"
                 min="0"
                 step="0.01"
-                value={paidAmount}
+                value={activeTab.paidAmount}
                 onChange={(e) => {
-                  setPaidAmount(e.target.value);
-                  setIsPaidTouched(true);
+                  updateActiveTabState('paidAmount', e.target.value);
+                  updateActiveTabState('isPaidTouched', true);
                 }}
                 placeholder={getFinalTotal().toFixed(2)}
                 className="w-24 border border-slate-200 rounded px-1.5 py-0.5 text-right font-semibold text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
               />
             </div>
 
-            {(() => {
+              {activeTab && (() => {
               const finalTotal = getFinalTotal();
-              const parsedPaid = paidAmount !== '' ? parseFloat(paidAmount) : finalTotal;
+              const parsedPaid = activeTab.paidAmount !== '' ? parseFloat(activeTab.paidAmount) : finalTotal;
               const dueAmount = finalTotal - parsedPaid;
               if (dueAmount > 0) {
                 return (
@@ -1812,9 +1882,9 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                 <button
                   key={method}
                   type="button"
-                  onClick={() => setPaymentMethod(method)}
+                  onClick={() => updateActiveTabState('paymentMethod', method)}
                   className={`py-1.5 px-2 rounded-lg text-xs font-semibold border text-center transition-all ${
-                    paymentMethod === method
+                    activeTab.paymentMethod === method
                       ? 'bg-slate-600 border-indigo-600 text-white shadow-sm'
                       : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
                   }`}
@@ -1829,8 +1899,8 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
           <div className="grid grid-cols-3 gap-2 mt-4">
             <button
               type="button"
-              onClick={() => setShowHoldBillModal(true)}
-              disabled={cart.length === 0}
+              onClick={() => { if (activeTab.cart.length > 0) setShowHoldBillModal(true); }}
+              disabled={activeTab.cart.length === 0}
               className="col-span-1 bg-amber-50 hover:bg-amber-100 disabled:bg-slate-100 disabled:text-slate-400 text-amber-700 border border-amber-200 disabled:border-slate-200 font-bold py-3 px-2 rounded-xl transition-colors flex justify-center items-center space-x-1.5"
               title="Hold Cart"
             >
@@ -1841,7 +1911,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
             </button>
             <button
               onClick={handleCheckout}
-              disabled={cart.length === 0 || submitting}
+              disabled={activeTab.cart.length === 0 || submitting}
               className="col-span-2 bg-slate-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-colors flex justify-center items-center space-x-2"
             >
               {submitting ? (
