@@ -603,13 +603,13 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
       updateActiveTabState('isPaidTouched', false);
       updateActiveTabState('paidAmount', '');
 
+      setShowHeldBillsModal(false);
       const token = localStorage.getItem('token');
       await fetch(`${API_BASE_URL}/held-bills/${heldBill.id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
 
-      setShowHeldBillsModal(false);
       fetchHeldBills();
     } catch (err) {
       triggerAlert('error', `Failed to resume held bill: ${err.message}`);
@@ -1477,7 +1477,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                     const isDueTracker = itemsList.length === 0;
 
                     return (
-                      <div
+                      <div 
                         key={bill.id} 
                         className="p-4 border border-slate-200 rounded-xl hover:border-indigo-300 transition-colors bg-slate-50/50 flex flex-col sm:flex-row justify-between sm:items-center gap-4 text-left"
                       >
@@ -1507,7 +1507,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                           </div>
                           {!isDueTracker && itemsList.length > 0 && (
                             <div className="text-[11px] text-slate-450 mt-1 truncate max-w-md">
-                              Items: {itemsList.map(item => `${item.name} (x${item.quantity})`).join(', ')}
+                              Items: {itemsList.map(item => `${item.product_name || 'Item'} (x${item.quantity})`).join(', ')}
                             </div>
                           )}
                         </div>
@@ -1557,7 +1557,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
 
   // --- SUB-COMPONENT: CART PANEL DETAILS ---
   function renderCartPanelContent() {
-    if (!activeTab) return null; // Guard against rendering when activeTab is undefined
+    if (!activeTab) return null; 
 
     return (
       <div className="flex flex-col h-full overflow-hidden">

@@ -147,7 +147,7 @@ router.post('/', authorize(['shop_admin', 'shop_staff']), async (req, res) => {
             cust.phone || null,
             cust.address || null,
             0.00,
-            note,
+            note, 
             '[]', // empty items JSON array since it is a due payment tracker
             dueAmount,
             'held'
