@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 const API_BASE_URL = 'http://localhost:5000/api';
 
 const createNewSaleTab = (index) => ({
-  id: Date.now() + index, // Unique ID for the tab
+  id: Date.now() + Math.random() * 1000, // Unique ID for the tab with random factor
   name: `Sale ${index}`,
   cart: [],
   selectedCustomerId: '',
@@ -24,7 +24,10 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
   const [products, setProducts] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [saleTabs, setSaleTabs] = useState([createNewSaleTab(1)]);
-  const [activeTabId, setActiveTabId] = useState(saleTabs[0].id);
+  const [activeTabId, setActiveTabId] = useState(() => {
+    const initialTab = createNewSaleTab(1);
+    return initialTab.id;
+  });
   const [search, setSearch] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
   const [taxRate, setTaxRate] = useState(0.10); // Dynamic Tax Rate (default 10%)
@@ -46,7 +49,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
 
   // Derived active tab state
   const activeTabIndex = saleTabs.findIndex(t => t.id === activeTabId);
-  const activeTab = saleTabs[activeTabIndex];
+  const activeTab = activeTabIndex > -1 ? saleTabs[activeTabIndex] : null;
 
   // Decode/parse current user details on start
   useEffect(() => {
@@ -65,6 +68,13 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
     // This effect is no longer needed as we bind directly to activeTab state.
     // Kept for historical context, can be removed.
   }, [activeTabId, saleTabs]);
+
+  // Ensure activeTabId is valid after tab operations
+  useEffect(() => {
+    if (saleTabs.length > 0 && !saleTabs.find(t => t.id === activeTabId)) {
+      setActiveTabId(saleTabs[0].id);
+    }
+  }, [saleTabs, activeTabId]);
 
   // Sync details input form fields when selection dropdown changes
   useEffect(() => {
@@ -223,6 +233,10 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
   };
   // 3. Cart State Modifications
   const addToCart = (product) => {
+    if (!activeTab) {
+      triggerAlert('error', 'No active tab selected.');
+      return;
+    }
     if (product.stock_quantity <= 0) {
       triggerAlert('error', `"${product.name}" is currently out of stock.`);
       return;
@@ -245,6 +259,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
   };
 
   const updateQuantity = (productId, change) => {
+    if (!activeTab) return;
     const targetItem = activeTab.cart.find(item => item.id === productId);
     if (!targetItem) return;
 
@@ -266,6 +281,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
   };
 
   const handleQuantityInput = (productId, valStr) => {
+    if (!activeTab) return;
     let parsedVal = parseInt(valStr, 10);
     const targetItem = activeTab.cart.find(item => item.id === productId);
     if (!targetItem) return;
@@ -287,23 +303,29 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
   };
 
   const handleQuantityBlur = (productId, quantity) => {
+    if (!activeTab) return;
     if (quantity <= 0) {
       removeFromCart(productId);
     }
   };
 
   const removeFromCart = (productId) => {
+    if (!activeTab) return;
     updateActiveTabState('cart', activeTab.cart.filter(item => item.id !== productId));
   };
 
   // Financial Calculators
-  const getSubtotal = () => activeTab?.cart.reduce((sum, item) => sum + (item.price * item.quantity), 0) || 0;
+  const getSubtotal = () => activeTab?.cart?.reduce((sum, item) => sum + (item.price * item.quantity), 0) || 0;
   const getTax = () => getSubtotal() * taxRate;
   const getDiscountAmount = () => getSubtotal() * (parseFloat(activeTab?.discountPercent || 0) / 100);
   const getFinalTotal = () => (getSubtotal() - getDiscountAmount()) + getTax() + parseFloat(activeTab?.reduceDueAmount || 0);
 
   // --- SUBMIT CHECKOUT ---
   const handleCheckout = async () => {
+    if (!activeTab) {
+      triggerAlert('error', 'No active tab selected.');
+      return;
+    }
     if (activeTab.cart.length === 0 && parseFloat(activeTab.reduceDueAmount || 0) <= 0) {
       triggerAlert('error', 'Checkout cart is empty.');
       return;
@@ -449,7 +471,11 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
       // Reset the completed tab
       setSaleTabs(prev => {
         const newTabs = [...prev];
-        newTabs[activeTabIndex] = createNewSaleTab(activeTabIndex + 1);
+        // Keep the same name but reset all other state
+        newTabs[activeTabIndex] = {
+          ...createNewSaleTab(activeTabIndex + 1),
+          name: prev[activeTabIndex].name
+        };
         return newTabs;
       });
       setMobileCartOpen(false);
@@ -468,6 +494,10 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
 
   const handleHoldBillSubmit = async (e) => {
     e.preventDefault();
+    if (!activeTab) {
+      triggerAlert('error', 'No active tab selected.');
+      return;
+    }
     if (activeTab.cart.length === 0) {
       triggerAlert('error', 'Cart is empty. Nothing to hold.');
       return;
@@ -510,7 +540,11 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
       // Reset the current tab
       setSaleTabs(prev => {
         const newTabs = [...prev];
-        newTabs[activeTabIndex] = createNewSaleTab(activeTabIndex + 1);
+        // Keep the same name but reset all other state
+        newTabs[activeTabIndex] = {
+          ...createNewSaleTab(activeTabIndex + 1),
+          name: prev[activeTabIndex].name
+        };
         return newTabs;
       });
       setHoldNotes('');
@@ -526,6 +560,10 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
   };
 
   const handleResumeHeldBill = async (heldBill) => {
+    if (!activeTab) {
+      triggerAlert('error', 'No active tab selected.');
+      return;
+    }
     if (activeTab.cart.length > 0) {
       if (!window.confirm('Resuming will overwrite your current active cart. Proceed?')) {
         return;
@@ -645,11 +683,15 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
       return;
     }
     const tabIndexToClose = saleTabs.findIndex(t => t.id === tabIdToClose);
+    if (tabIndexToClose === -1) return;
+    
     const newTabs = saleTabs.filter(t => t.id !== tabIdToClose);
     setSaleTabs(newTabs);
 
     if (activeTabId === tabIdToClose) {
-      setActiveTabId(newTabs[Math.max(0, tabIndexToClose - 1)].id);
+      // Switch to the previous tab, or the first tab if closing the first one
+      const newIndex = Math.max(0, tabIndexToClose - 1);
+      setActiveTabId(newTabs[newIndex]?.id || newTabs[0].id);
     }
   };
 
@@ -765,7 +807,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-sm">
                       {products.map((product) => {
-                        const inCartItem = activeTab.cart.find(item => item.id === product.id);
+                        const inCartItem = activeTab?.cart?.find(item => item.id === product.id);
                         const remainingQty = product.stock_quantity - (inCartItem ? inCartItem.quantity : 0);
                         const isOutOfStock = remainingQty <= 0;
 
@@ -847,7 +889,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
         <div>
           <p className="text-xs text-slate-400 font-medium">Active Cart</p>
           <p className="text-lg font-bold text-slate-800">
-            {activeTab?.cart.reduce((sum, item) => sum + item.quantity, 0) || 0} Items - <span className="text-indigo-600">৳{getFinalTotal().toFixed(2)}</span>
+            {activeTab?.cart?.reduce((sum, item) => sum + item.quantity, 0) || 0} Items - <span className="text-indigo-600">৳{getFinalTotal().toFixed(2)}</span>
           </p>
         </div>
         <button
@@ -1726,7 +1768,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
 
         {/* Selected products scrollpane */}
         <div className="flex-1 overflow-y-auto p-4 divide-y divide-slate-100 min-h-0">
-          {activeTab.cart.length === 0 ? (
+          {activeTab?.cart?.length === 0 ? (
             <div className="h-full flex flex-col justify-center items-center text-slate-400 py-12">
               <svg className="w-10 h-10 mb-2 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z" />
@@ -1734,7 +1776,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
               <p className="text-sm font-medium">Cart is empty</p>
             </div>
           ) : (
-            activeTab.cart.map((item) => (
+            activeTab?.cart?.map((item) => (
               <div key={item.id} className="py-3 flex items-center justify-between first:pt-0 last:pb-0">
                 <div className="min-w-0 pr-3">
                   <h4 className="text-sm font-semibold text-slate-800 truncate">{item.name}</h4>
@@ -1816,7 +1858,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
               <span className="font-semibold">৳{getTax().toFixed(2)}</span>
             </div>
 
-{parseFloat(activeTab.reduceDueAmount || 0) > 0 && (
+{parseFloat(activeTab?.reduceDueAmount || 0) > 0 && (
                <div className="flex justify-between items-center bg-rose-50 border border-rose-100 rounded-lg p-2.5 text-rose-800 font-medium">
                  <span className="flex items-center">
                    <svg className="w-3.5 h-3.5 mr-1 text-rose-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1825,7 +1867,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                    Due Balance Payment
                  </span>
                  <div className="flex items-center space-x-1.5">
-                   <span className="font-bold">৳{parseFloat(activeTab.reduceDueAmount).toFixed(2)}</span>
+                   <span className="font-bold">৳{parseFloat(activeTab?.reduceDueAmount).toFixed(2)}</span>
                    <button
                      type="button"
                      onClick={() => {
@@ -1896,7 +1938,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                   type="button"
                   onClick={() => updateActiveTabState('paymentMethod', method)}
                   className={`py-1.5 px-2 rounded-lg text-xs font-semibold border text-center transition-all ${
-                    activeTab.paymentMethod === method
+                    activeTab?.paymentMethod === method
                       ? 'bg-slate-600 border-indigo-600 text-white shadow-sm'
                       : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
                   }`}
@@ -1911,8 +1953,8 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
           <div className="grid grid-cols-3 gap-2 mt-4">
             <button
               type="button"
-              onClick={() => { if (activeTab.cart.length > 0) setShowHoldBillModal(true); }}
-              disabled={activeTab.cart.length === 0}
+              onClick={() => { if (activeTab?.cart?.length > 0) setShowHoldBillModal(true); }}
+              disabled={activeTab?.cart?.length === 0}
               className="col-span-1 bg-amber-50 hover:bg-amber-100 disabled:bg-slate-100 disabled:text-slate-400 text-amber-700 border border-amber-200 disabled:border-slate-200 font-bold py-3 px-2 rounded-xl transition-colors flex justify-center items-center space-x-1.5"
               title="Hold Cart"
             >
@@ -1923,7 +1965,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
             </button>
             <button
               onClick={handleCheckout}
-              disabled={activeTab.cart.length === 0 || submitting}
+              disabled={activeTab?.cart?.length === 0 || submitting}
               className="col-span-2 bg-slate-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white font-bold py-3 px-4 rounded-xl shadow-lg transition-colors flex justify-center items-center space-x-2"
             >
               {submitting ? (
