@@ -371,6 +371,43 @@ router.get('/', async (req, res) => {
         GROUP BY payment_method
       `, [shopId]);
 
+      // Get Top-Selling Products (Top 5)
+      const [topSelling] = await db.query(`
+        SELECT 
+          p.id,
+          p.name,
+          p.sku,
+          p.stock_quantity,
+          p.price,
+          p.unit,
+          COALESCE(SUM(si.quantity), 0) as total_sold,
+          COALESCE(SUM(si.subtotal), 0) as total_revenue
+        FROM products p
+        JOIN sale_items si ON p.id = si.product_id
+        WHERE p.shop_id = ?
+        GROUP BY p.id, p.name, p.sku, p.stock_quantity, p.price, p.unit
+        ORDER BY total_sold DESC
+        LIMIT 5
+      `, [shopId]);
+
+      // Get Dead Stock (Top 5 items sitting in inventory with 0 sales)
+      const [deadStock] = await db.query(`
+        SELECT 
+          p.id,
+          p.name,
+          p.sku,
+          p.stock_quantity,
+          p.price,
+          p.unit
+        FROM products p
+        LEFT JOIN sale_items si ON p.id = si.product_id
+        WHERE p.shop_id = ? 
+          AND p.stock_quantity > 0
+          AND si.id IS NULL
+        ORDER BY p.stock_quantity DESC
+        LIMIT 5
+      `, [shopId]);
+
       // Populate last 7 days to guarantee 7 points even if some days have 0 sales
       const trendMap = {};
       for (let i = 6; i >= 0; i--) {
@@ -400,7 +437,9 @@ router.get('/', async (req, res) => {
         },
         recent_sales: recentSales,
         sales_trend: salesTrend,
-        payment_method_breakdown: paymentBreakdown
+        payment_method_breakdown: paymentBreakdown,
+        top_selling: topSelling,
+        dead_stock: deadStock
       });
     }
   } catch (error) {

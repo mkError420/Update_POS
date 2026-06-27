@@ -15,7 +15,7 @@ router.get('/', async (req, res) => {
   const shopId = req.shopId;
   try {
     const [customers] = await db.query(
-      'SELECT id, name, phone, email, address, due_balance FROM customers WHERE shop_id = ? ORDER BY name ASC',
+      'SELECT id, name, phone, email, address, due_balance, loyalty_points FROM customers WHERE shop_id = ? ORDER BY name ASC',
       [shopId]
     );
     res.json(customers);

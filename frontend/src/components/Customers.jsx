@@ -360,13 +360,14 @@ export default function Customers() {
                 <th className="p-4">Email</th>
                 <th className="p-4">Address</th>
                 <th className="p-4">Due Balance</th>
+                <th className="p-4">Loyalty Points</th>
                 <th className="p-4 text-center">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
               {loading ? (
                 <tr>
-                  <td colSpan="6" className="p-12 text-center">
+                  <td colSpan="7" className="p-12 text-center">
                     <div className="flex justify-center items-center">
                       <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-indigo-600"></div>
                     </div>
@@ -374,7 +375,7 @@ export default function Customers() {
                 </tr>
               ) : filteredCustomers.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="p-12 text-center text-slate-400">
+                  <td colSpan="7" className="p-12 text-center text-slate-400">
                     No matching customers found.
                   </td>
                 </tr>
@@ -393,6 +394,11 @@ export default function Customers() {
                       ) : (
                         <span className="text-slate-400 text-xs font-medium">৳0.00</span>
                       )}
+                    </td>
+                    <td className="p-4 font-semibold text-slate-800">
+                      <span className="bg-indigo-50 text-indigo-700 text-xs font-bold px-2.5 py-1 rounded-lg border border-indigo-100">
+                        {customer.loyalty_points || 0} pts
+                      </span>
                     </td>
                     <td className="p-4 text-center space-x-2 whitespace-nowrap">
                       <button

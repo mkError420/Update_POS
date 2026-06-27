@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 const API_BASE_URL = 'http://localhost:5000/api';
@@ -17,6 +17,7 @@ const createNewSaleTab = (index) => ({
   paidAmount: '',
   isPaidTouched: false,
   reduceDueAmount: 0,
+  redeemPoints: 0, // Loyalty points to redeem
 });
 
 export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill = null, onClearResumedHeldBill = () => {} }) {
@@ -31,6 +32,16 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
   const [search, setSearch] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
   const [taxRate, setTaxRate] = useState(0.10); // Dynamic Tax Rate (default 10%)
+
+  // Loyalty settings states
+  const [loyaltyEnabled, setLoyaltyEnabled] = useState(false);
+  const [loyaltyEarnRate, setLoyaltyEarnRate] = useState(100.00);
+  const [loyaltyPointValue, setLoyaltyPointValue] = useState(1.00);
+
+  // Barcode scanner states
+  const [barcodeInput, setBarcodeInput] = useState('');
+  const [autoFocusBarcode, setAutoFocusBarcode] = useState(true);
+  const barcodeInputRef = useRef(null);
 
   // UI States
   const [loading, setLoading] = useState(false);
@@ -139,7 +150,7 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
     }
   };
 
-  // 3. Fetch shop settings (for tax rate)
+  // 3. Fetch shop settings (for tax rate and loyalty program)
   const fetchShopSettings = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -151,9 +162,18 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
         if (data.tax_rate !== undefined) {
           setTaxRate(parseFloat(data.tax_rate) / 100);
         }
+        if (data.loyalty_enabled !== undefined) {
+          setLoyaltyEnabled(data.loyalty_enabled === 1 || data.loyalty_enabled === true);
+        }
+        if (data.loyalty_point_earn_rate !== undefined) {
+          setLoyaltyEarnRate(parseFloat(data.loyalty_point_earn_rate));
+        }
+        if (data.loyalty_point_value !== undefined) {
+          setLoyaltyPointValue(parseFloat(data.loyalty_point_value));
+        }
       }
     } catch (e) {
-      console.error('Failed to fetch shop settings for tax rate', e);
+      console.error('Failed to fetch shop settings for tax rate and loyalty program', e);
     }
   };
 
@@ -206,11 +226,133 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
     }
   }, [activeTab?.cart, activeTab?.discountPercent, taxRate, activeTab?.isPaidTouched, activeTab?.reduceDueAmount]);
 
+  // Auto-focus barcode reader input when active
+  useEffect(() => {
+    if (!autoFocusBarcode) return;
+    
+    const keepFocus = () => {
+      // If modal is open, do not steal focus
+      if (receipt || showHeldBillsModal || showHoldBillModal) {
+        return;
+      }
+      
+      const active = document.activeElement;
+      if (
+        active &&
+        (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT') &&
+        active !== barcodeInputRef.current
+      ) {
+        return; // Cashier is currently editing another field
+      }
+      
+      if (barcodeInputRef.current) {
+        barcodeInputRef.current.focus();
+      }
+    };
+
+    keepFocus();
+    
+    // Add event listener to capture click events to recover focus
+    const handleDocumentClick = () => {
+      setTimeout(keepFocus, 100);
+    };
+    
+    document.addEventListener('click', handleDocumentClick);
+    return () => {
+      document.removeEventListener('click', handleDocumentClick);
+    };
+  }, [autoFocusBarcode, receipt, showHeldBillsModal, showHoldBillModal]);
+
   // --- HELPER FUNCTIONS ---
   
   const triggerAlert = (type, message) => {
     setAlert({ type, message });
     setTimeout(() => setAlert(null), 5000);
+  };
+
+  const playBeepSound = (success = true) => {
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (success) {
+        // High pitch quick beep
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(1200, audioCtx.currentTime); // 1200Hz
+        gain.gain.setValueAtTime(0.08, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.12);
+      } else {
+        // Low pitch double beep for warning
+        const playBeep = (timeOffset) => {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(180, audioCtx.currentTime + timeOffset); // 180Hz
+          gain.gain.setValueAtTime(0.12, audioCtx.currentTime + timeOffset);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + timeOffset + 0.22);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start(audioCtx.currentTime + timeOffset);
+          osc.stop(audioCtx.currentTime + timeOffset + 0.22);
+        };
+        playBeep(0);
+        playBeep(0.12);
+      }
+    } catch (e) {
+      console.error('AudioContext beep failed', e);
+    }
+  };
+
+  const handleBarcodeScan = async (barcode) => {
+    if (!barcode || !barcode.trim()) return;
+    const trimmedBarcode = barcode.trim();
+    
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_BASE_URL}/products?search=${encodeURIComponent(trimmedBarcode)}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (!response.ok) throw new Error('Barcode lookup failed.');
+      const data = await response.json();
+      
+      // Find a product with the exact SKU
+      const exactMatch = data.find(p => p.sku.toLowerCase() === trimmedBarcode.toLowerCase());
+      
+      if (exactMatch) {
+        if (exactMatch.stock_quantity <= 0) {
+          playBeepSound(false);
+          triggerAlert('error', `Product "${exactMatch.name}" is out of stock.`);
+        } else {
+          addToCart(exactMatch);
+          playBeepSound(true);
+          triggerAlert('success', `Added to cart: ${exactMatch.name}`);
+        }
+      } else {
+        playBeepSound(false);
+        triggerAlert('error', `Product with SKU "${trimmedBarcode}" not found.`);
+      }
+    } catch (err) {
+      playBeepSound(false);
+      triggerAlert('error', err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBarcodeKeydown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleBarcodeScan(barcodeInput);
+      setBarcodeInput('');
+    }
   };
 
   const handlePrint = (mode) => {
@@ -318,7 +460,15 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
   const getSubtotal = () => activeTab?.cart?.reduce((sum, item) => sum + (item.price * item.quantity), 0) || 0;
   const getTax = () => getSubtotal() * taxRate;
   const getDiscountAmount = () => getSubtotal() * (parseFloat(activeTab?.discountPercent || 0) / 100);
-  const getFinalTotal = () => (getSubtotal() - getDiscountAmount()) + getTax() + parseFloat(activeTab?.reduceDueAmount || 0);
+  const getPointsDiscount = () => (activeTab?.redeemPoints || 0) * loyaltyPointValue;
+  const getFinalTotal = () => {
+    const sub = getSubtotal();
+    const disc = getDiscountAmount();
+    const pointsDisc = getPointsDiscount();
+    const taxVal = getTax();
+    const total = (sub - disc - pointsDisc) + taxVal + parseFloat(activeTab?.reduceDueAmount || 0);
+    return Math.max(0, total);
+  };
 
   // --- SUBMIT CHECKOUT ---
   const handleCheckout = async () => {
@@ -409,8 +559,10 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
         customer_id: finalCustomerId,
         discount: getDiscountAmount(),
         tax: getTax(),
-        payment_method: activeTab.paymentMethod, // This was already correct, but good to confirm
-        paid_amount: parsedPaid,        reduce_due_amount: parseFloat(activeTab.reduceDueAmount || 0),
+        payment_method: activeTab.paymentMethod,
+        paid_amount: parsedPaid,
+        reduce_due_amount: parseFloat(activeTab.reduceDueAmount || 0),
+        redeem_points: activeTab.redeemPoints || 0,
         items: activeTab.cart.map(item => ({
           product_id: item.id,
           quantity: item.quantity
@@ -457,7 +609,11 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
         staff_name: currentUser?.name || 'Cashier',
         reduce_due_amount: parseFloat(activeTab.reduceDueAmount || 0),
         paid_amount: paid,
-        due_amount: outstandingDue > 0 ? outstandingDue : 0
+        due_amount: outstandingDue > 0 ? outstandingDue : 0,
+        loyalty_enabled: loyaltyEnabled,
+        points_earned: data.points_earned || 0,
+        points_redeemed: activeTab.redeemPoints || 0,
+        points_redeemed_value: (activeTab.redeemPoints || 0) * loyaltyPointValue
       });
 
       // Show warnings if inventory items hit low stock limit
@@ -819,18 +975,62 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
         {/* Left Side: Product Grid (2 columns on Desktop) */}
         <div className="lg:col-span-2 flex flex-col overflow-hidden">
           
-          {/* Search Header Input bar */}
-          <div className="mb-4 relative">
-            <input
-              type="text"
-              placeholder="Search by product name or scan SKU code..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-            />
-            <svg className="absolute left-3.5 top-3.5 w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
+          {/* Search & Barcode Scan Console */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+            {/* Search Input */}
+            <div className="sm:col-span-2 relative">
+              <input
+                type="text"
+                placeholder="Search by product name..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-10 pr-4 py-3 bg-white border border-slate-200 rounded-xl shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-sm font-medium"
+              />
+              <svg className="absolute left-3.5 top-3.5 w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
+            
+            {/* Barcode Scanner Console */}
+            <div className="relative flex items-center bg-slate-900 border border-slate-800 text-white rounded-xl shadow-sm px-3.5 py-3 overflow-hidden group">
+              {autoFocusBarcode && !receipt && !showHeldBillsModal && !showHoldBillModal && (
+                <div className="laser-line animate-laser-scan"></div>
+              )}
+              
+              <div className="flex items-center space-x-2.5 w-full z-10">
+                {/* Barcode Icon */}
+                <div className="relative flex-shrink-0 text-rose-500 group-hover:text-rose-400 animate-pulse">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 5v14M7 5v14M11 5v14M14 5v14M17 5v14M21 5v14" />
+                  </svg>
+                </div>
+                
+                {/* Scanner Input */}
+                <input
+                  ref={barcodeInputRef}
+                  type="text"
+                  placeholder="Scan barcode / SKU..."
+                  value={barcodeInput}
+                  onChange={(e) => setBarcodeInput(e.target.value)}
+                  onKeyDown={handleBarcodeKeydown}
+                  className="bg-transparent text-white placeholder-slate-500 border-none outline-none focus:ring-0 w-full text-xs font-semibold p-0"
+                />
+                
+                {/* Auto-focus Status Indicator / Toggle */}
+                <button
+                  type="button"
+                  onClick={() => setAutoFocusBarcode(!autoFocusBarcode)}
+                  className={`flex-shrink-0 text-[9px] font-extrabold px-2 py-1 rounded transition-all tracking-wider ${
+                    autoFocusBarcode 
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' 
+                      : 'bg-slate-800 text-slate-400 border border-slate-700'
+                  }`}
+                  title={autoFocusBarcode ? "Click to switch to manual mode" : "Click to switch to auto-focus scanner mode"}
+                >
+                  {autoFocusBarcode ? "AUTO" : "MANUAL"}
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* Product Items Scrolling Container */}
@@ -1052,6 +1252,28 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                         <span>Tax:</span>
                         <span className="font-medium text-slate-800">৳{parseFloat(receipt.tax).toFixed(2)}</span>
                       </div>
+                      {receipt.loyalty_enabled && (
+                        <>
+                          {receipt.points_earned > 0 && (
+                            <div className="flex justify-between text-indigo-650 font-semibold">
+                              <span>Points Earned:</span>
+                              <span>+{receipt.points_earned} pts</span>
+                            </div>
+                          )}
+                          {receipt.points_redeemed > 0 && (
+                            <div className="flex justify-between text-rose-600 font-semibold">
+                              <span>Points Redeemed:</span>
+                              <span>-{receipt.points_redeemed} pts</span>
+                            </div>
+                          )}
+                          {receipt.points_redeemed_value > 0 && (
+                            <div className="flex justify-between text-rose-500 text-[10px]">
+                              <span>Points Discount:</span>
+                              <span>-৳{receipt.points_redeemed_value.toFixed(2)}</span>
+                            </div>
+                          )}
+                        </>
+                      )}
                       {parseFloat(receipt.reduce_due_amount || 0) > 0 && (
                         <div className="flex justify-between text-indigo-600 font-medium">
                           <span>Due Paid:</span>
@@ -1150,6 +1372,28 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                           <span>Tax:</span>
                           <span className="font-semibold text-slate-800">৳{parseFloat(receipt.tax).toFixed(2)}</span>
                         </div>
+                        {receipt.loyalty_enabled && (
+                          <>
+                            {receipt.points_earned > 0 && (
+                              <div className="flex justify-between text-indigo-650 font-bold">
+                                <span>Loyalty Points Earned:</span>
+                                <span>+{receipt.points_earned} pts</span>
+                              </div>
+                            )}
+                            {receipt.points_redeemed > 0 && (
+                              <div className="flex justify-between text-rose-600 font-bold">
+                                <span>Loyalty Points Redeemed:</span>
+                                <span>-{receipt.points_redeemed} pts</span>
+                              </div>
+                            )}
+                            {receipt.points_redeemed_value > 0 && (
+                              <div className="flex justify-between text-rose-500 font-semibold">
+                                <span>Points Discount:</span>
+                                <span>-৳{receipt.points_redeemed_value.toFixed(2)}</span>
+                              </div>
+                            )}
+                          </>
+                        )}
                         {parseFloat(receipt.reduce_due_amount || 0) > 0 && (
                           <div className="flex justify-between text-indigo-600 font-semibold">
                             <span>Due Paid:</span>
@@ -1325,10 +1569,32 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                   <span>-৳{parseFloat(receipt.discount).toFixed(2)}</span>
                 </div>
               )}
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', style: { justifyContent: 'space-between' } }}>
                 <span>Tax ({(taxRate * 100).toString()}%):</span>
                 <span>৳{receipt.tax.toFixed(2)}</span>
               </div>
+              {receipt.loyalty_enabled && (
+                <>
+                  {receipt.points_earned > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#4f46e5', fontWeight: 'bold' }}>
+                      <span>Points Earned:</span>
+                      <span>+{receipt.points_earned} pts</span>
+                    </div>
+                  )}
+                  {receipt.points_redeemed > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#e11d48', fontWeight: 'bold' }}>
+                      <span>Points Redeemed:</span>
+                      <span>-{receipt.points_redeemed} pts</span>
+                    </div>
+                  )}
+                  {receipt.points_redeemed_value > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#e11d48' }}>
+                      <span>Points Discount:</span>
+                      <span>-৳{receipt.points_redeemed_value.toFixed(2)}</span>
+                    </div>
+                  )}
+                </>
+              )}
               {parseFloat(receipt.reduce_due_amount || 0) > 0 && (
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 'bold' }}>
                   <span>Due Paid:</span>
@@ -1425,6 +1691,28 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                   <span>Tax ({(taxRate * 100).toString()}%)</span>
                   <span style={{ fontWeight: '600', color: '#1e293b' }}>৳{receipt.tax.toFixed(2)}</span>
                 </div>
+                {receipt.loyalty_enabled && (
+                  <>
+                    {receipt.points_earned > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', color: '#4f46e5', fontWeight: 'bold' }}>
+                        <span>Loyalty Points Earned</span>
+                        <span>+{receipt.points_earned} pts</span>
+                      </div>
+                    )}
+                    {receipt.points_redeemed > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', color: '#e11d48', fontWeight: 'bold' }}>
+                        <span>Loyalty Points Redeemed</span>
+                        <span>-{receipt.points_redeemed} pts</span>
+                      </div>
+                    )}
+                    {receipt.points_redeemed_value > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', color: '#e11d48' }}>
+                        <span>Points Cashback Discount</span>
+                        <span>-৳{receipt.points_redeemed_value.toFixed(2)}</span>
+                      </div>
+                    )}
+                  </>
+                )}
                 {parseFloat(receipt.reduce_due_amount || 0) > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', color: '#4f46e5', fontWeight: 'bold' }}>
                     <span>Due Balance Paid</span>
@@ -1735,6 +2023,75 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
                return null;
              })()}
 
+              {/* Loyalty Points Section */}
+              {loyaltyEnabled && activeTab.selectedCustomerId && (() => {
+                const selected = customers.find(c => c.id === parseInt(activeTab.selectedCustomerId));
+                const availablePoints = selected?.loyalty_points || 0;
+                const pointsDiscountVal = (activeTab.redeemPoints || 0) * loyaltyPointValue;
+                
+                return (
+                  <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-2.5 space-y-2 text-xs text-indigo-850">
+                    <div className="flex justify-between items-center">
+                      <span className="font-semibold">Loyalty Program Active</span>
+                      <span className="bg-indigo-600 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                        {availablePoints} Points Available
+                      </span>
+                    </div>
+                    
+                    <div className="flex justify-between items-center text-[10px] text-indigo-700 font-medium">
+                      <span>Redeem value: ৳{loyaltyPointValue.toFixed(2)} / pt</span>
+                      <span>Total Value: ৳{(availablePoints * loyaltyPointValue).toFixed(2)}</span>
+                    </div>
+                    
+                    {availablePoints > 0 && (
+                      <div className="flex justify-between items-center pt-2 border-t border-indigo-200">
+                        <span className="font-semibold">Redeem Points:</span>
+                        <div className="flex items-center space-x-1.5">
+                          <input
+                            type="number"
+                            min="0"
+                            max={availablePoints}
+                            value={activeTab.redeemPoints > 0 ? activeTab.redeemPoints : ''}
+                            onChange={(e) => {
+                              let val = parseInt(e.target.value, 10) || 0;
+                              if (val < 0) val = 0;
+                              if (val > availablePoints) val = availablePoints;
+                              
+                              const maxPointsToCover = Math.ceil(getSubtotal() / loyaltyPointValue);
+                              if (val > maxPointsToCover) val = maxPointsToCover;
+                              
+                              updateActiveTabState('redeemPoints', val);
+                              updateActiveTabState('paidAmount', '');
+                              updateActiveTabState('isPaidTouched', false);
+                            }}
+                            placeholder="0"
+                            className="w-16 border border-indigo-300 rounded px-1.5 py-0.5 text-right font-bold text-indigo-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const maxPointsToCover = Math.ceil(getSubtotal() / loyaltyPointValue);
+                              const val = Math.min(availablePoints, maxPointsToCover);
+                              updateActiveTabState('redeemPoints', val);
+                              updateActiveTabState('paidAmount', '');
+                              updateActiveTabState('isPaidTouched', false);
+                            }}
+                            className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-extrabold px-1.5 py-0.5 rounded border border-indigo-200 text-[10px] transition-colors"
+                          >
+                            MAX
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {activeTab.redeemPoints > 0 && (
+                      <div className="text-[10px] text-emerald-600 font-bold text-right">
+                        Discount Applied: -৳{pointsDiscountVal.toFixed(2)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
             <div className="grid grid-cols-1 gap-2">
               <div>
                 <input
@@ -1910,6 +2267,13 @@ export default function Checkout({ onHeldBillsChange = () => {}, resumedHeldBill
               <div className="flex justify-between text-xs text-rose-500">
                 <span>Discounted Amount</span>
                 <span>-৳{getDiscountAmount().toFixed(2)}</span>
+              </div>
+            )}
+
+            {getPointsDiscount() > 0 && (
+              <div className="flex justify-between text-xs text-emerald-600 font-medium">
+                <span>Loyalty Cashback Discount</span>
+                <span>-৳{getPointsDiscount().toFixed(2)}</span>
               </div>
             )}
 

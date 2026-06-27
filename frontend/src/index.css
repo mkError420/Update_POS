@@ -114,4 +114,33 @@
   }
 }
 
+/* --- BARCODE SCANNER LASER STYLES --- */
+@keyframes laser-scan {
+  0% {
+    top: 5%;
+  }
+  50% {
+    top: 95%;
+  }
+  100% {
+    top: 5%;
+  }
+}
+
+.animate-laser-scan {
+  animation: laser-scan 2.5s infinite linear;
+}
+
+.laser-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: #f43f5e; /* Rose 500 */
+  box-shadow: 0 0 8px #f43f5e, 0 0 12px #fb7185;
+  pointer-events: none;
+  z-index: 5;
+}
+
+
 

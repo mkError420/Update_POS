@@ -32,7 +32,7 @@ router.get('/my-shop', enforceTenant, authorize(['shop_admin', 'shop_staff']), a
   const shopId = req.shopId;
   try {
     const [shops] = await db.query(
-      'SELECT id, name, email, phone, address, tax_rate, logo, status, created_at FROM shops WHERE id = ?',
+      'SELECT id, name, email, phone, address, tax_rate, logo, status, loyalty_enabled, loyalty_point_earn_rate, loyalty_point_value, created_at FROM shops WHERE id = ?',
       [shopId]
     );
 
@@ -60,7 +60,7 @@ router.get('/my-shop', enforceTenant, authorize(['shop_admin', 'shop_staff']), a
  */
 router.put('/my-shop', enforceTenant, authorize(['shop_admin']), async (req, res) => {
   const shopId = req.shopId;
-  const { name, email, phone, address, tax_rate, logo } = req.body;
+  const { name, email, phone, address, tax_rate, logo, loyalty_enabled, loyalty_point_earn_rate, loyalty_point_value } = req.body;
 
   if (!name || !email) {
     return res.status(400).json({ error: 'Shop name and email are required.' });
@@ -69,6 +69,20 @@ router.put('/my-shop', enforceTenant, authorize(['shop_admin']), async (req, res
   const taxRateVal = tax_rate !== undefined ? parseFloat(tax_rate) : 10.00;
   if (isNaN(taxRateVal) || taxRateVal < 0 || taxRateVal > 100) {
     return res.status(400).json({ error: 'Tax rate must be a valid number between 0 and 100.' });
+  }
+
+  // Validate loyalty parameters if enabled
+  const isLoyaltyEnabled = loyalty_enabled ? 1 : 0;
+  const earnRateVal = loyalty_point_earn_rate !== undefined ? parseFloat(loyalty_point_earn_rate) : 100.00;
+  const pointValueVal = loyalty_point_value !== undefined ? parseFloat(loyalty_point_value) : 1.00;
+
+  if (isLoyaltyEnabled) {
+    if (isNaN(earnRateVal) || earnRateVal <= 0) {
+      return res.status(400).json({ error: 'Loyalty earn rate must be a valid number greater than 0.' });
+    }
+    if (isNaN(pointValueVal) || pointValueVal <= 0) {
+      return res.status(400).json({ error: 'Loyalty point redemption value must be a valid number greater than 0.' });
+    }
   }
 
   try {
@@ -81,8 +95,26 @@ router.put('/my-shop', enforceTenant, authorize(['shop_admin']), async (req, res
       return res.status(400).json({ error: 'Another shop is already registered with this email.' });
     }
 
-    const updateFields = ['name = ?', 'email = ?', 'phone = ?', 'address = ?', 'tax_rate = ?'];
-    const queryParams = [name, email, phone || null, address || null, taxRateVal];
+    const updateFields = [
+      'name = ?', 
+      'email = ?', 
+      'phone = ?', 
+      'address = ?', 
+      'tax_rate = ?',
+      'loyalty_enabled = ?',
+      'loyalty_point_earn_rate = ?',
+      'loyalty_point_value = ?'
+    ];
+    const queryParams = [
+      name, 
+      email, 
+      phone || null, 
+      address || null, 
+      taxRateVal,
+      isLoyaltyEnabled,
+      earnRateVal,
+      pointValueVal
+    ];
 
     if (logo !== undefined) {
       updateFields.push('logo = ?');

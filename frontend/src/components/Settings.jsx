@@ -52,7 +52,10 @@ export default function Settings({ onNavigate = () => {} }) {
           tax_rate: data.tax_rate !== undefined ? data.tax_rate : '10.00',
           password: '',
           confirmPassword: '',
-          logo: data.logo || ''
+          logo: data.logo || '',
+          loyalty_enabled: data.loyalty_enabled === 1 || data.loyalty_enabled === true,
+          loyalty_point_earn_rate: data.loyalty_point_earn_rate !== undefined ? data.loyalty_point_earn_rate : '100.00',
+          loyalty_point_value: data.loyalty_point_value !== undefined ? data.loyalty_point_value : '1.00'
         });
       }
     } catch (err) {
@@ -150,7 +153,17 @@ export default function Settings({ onNavigate = () => {} }) {
       
       const bodyData = isSuperAdmin 
         ? { name: formData.name, email: formData.email, password: formData.password || undefined, logo: formData.logo }
-        : { name: formData.name, email: formData.email, phone: formData.phone, address: formData.address, tax_rate: formData.tax_rate, logo: formData.logo };
+        : { 
+            name: formData.name, 
+            email: formData.email, 
+            phone: formData.phone, 
+            address: formData.address, 
+            tax_rate: formData.tax_rate, 
+            logo: formData.logo,
+            loyalty_enabled: formData.loyalty_enabled ? 1 : 0,
+            loyalty_point_earn_rate: formData.loyalty_point_earn_rate,
+            loyalty_point_value: formData.loyalty_point_value
+          };
 
       const response = await fetch(url, {
         method: 'PUT',
@@ -291,6 +304,68 @@ export default function Settings({ onNavigate = () => {} }) {
                   className="w-full border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:ring-1 focus:ring-indigo-500"
                   placeholder="e.g. 10.00"
                 />
+              </div>
+
+              {/* Loyalty Program Settings Section */}
+              <div className="border-t border-slate-100 pt-5 mt-5">
+                <h3 className="text-sm font-semibold text-slate-800 mb-1">Customer Loyalty Points Program</h3>
+                <p className="text-xs text-slate-400 mb-4">Configure custom loyalty points for customer spending and redemption.</p>
+                
+                <div className="space-y-4">
+                  <div className="flex items-center space-x-3 bg-slate-50 p-3 rounded-xl border border-slate-100">
+                    <input
+                      type="checkbox"
+                      id="loyalty_enabled"
+                      name="loyalty_enabled"
+                      checked={formData.loyalty_enabled || false}
+                      onChange={(e) => setFormData({ ...formData, loyalty_enabled: e.target.checked })}
+                      className="w-4 h-4 text-indigo-600 border-slate-350 rounded focus:ring-indigo-500"
+                    />
+                    <label htmlFor="loyalty_enabled" className="text-sm font-semibold text-slate-700 cursor-pointer select-none">
+                      Enable Loyalty Points Program
+                    </label>
+                  </div>
+
+                  {formData.loyalty_enabled && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pl-7">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+                          Earn Rate (Spent per Point) *
+                        </label>
+                        <input
+                          type="number"
+                          name="loyalty_point_earn_rate"
+                          step="0.01"
+                          min="1"
+                          required={formData.loyalty_enabled}
+                          value={formData.loyalty_point_earn_rate}
+                          onChange={handleInputChange}
+                          className="w-full border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:ring-1 focus:ring-indigo-500"
+                          placeholder="e.g. 100.00"
+                        />
+                        <span className="text-[10px] text-slate-400">Customer earns 1 point for every N spent.</span>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+                          Redemption Value (per Point) *
+                        </label>
+                        <input
+                          type="number"
+                          name="loyalty_point_value"
+                          step="0.01"
+                          min="0.01"
+                          required={formData.loyalty_enabled}
+                          value={formData.loyalty_point_value}
+                          onChange={handleInputChange}
+                          className="w-full border border-slate-200 rounded-lg p-2.5 text-sm outline-none focus:ring-1 focus:ring-indigo-500"
+                          placeholder="e.g. 1.00"
+                        />
+                        <span className="text-[10px] text-slate-400">Monetary discount value of 1 loyalty point.</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             </>
           )}

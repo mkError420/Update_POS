@@ -92,7 +92,43 @@ router.post('/', authorize(['shop_admin', 'shop_staff']), async (req, res) => {
     }
 
     // 3. Compute financial amounts
-    const finalAmount = (calculatedTotal - parseFloat(discount)) + parseFloat(tax) + parsedReduceDue;
+    // Retrieve shop settings for loyalty program
+    const [shopRows] = await connection.query(
+      'SELECT loyalty_enabled, loyalty_point_earn_rate, loyalty_point_value FROM shops WHERE id = ?',
+      [shopId]
+    );
+    const shopSettings = shopRows[0] || { loyalty_enabled: 0, loyalty_point_earn_rate: 100.00, loyalty_point_value: 1.00 };
+    const isLoyaltyEnabled = shopSettings.loyalty_enabled === 1 || shopSettings.loyalty_enabled === true;
+
+    // Check if points are redeemed
+    const { redeem_points = 0 } = req.body;
+    const parsedRedeemPoints = parseInt(redeem_points || 0, 10);
+    let pointsRedeemedValue = 0.00;
+
+    if (isLoyaltyEnabled && customer_id && parsedRedeemPoints > 0) {
+      // Validate customer has enough points
+      const [customerRows] = await connection.query(
+        'SELECT loyalty_points FROM customers WHERE id = ? AND shop_id = ? FOR UPDATE',
+        [customer_id, shopId]
+      );
+      if (customerRows.length === 0) {
+        throw new Error('Customer not found for loyalty points redemption.');
+      }
+      const currentPoints = customerRows[0].loyalty_points || 0;
+      if (currentPoints < parsedRedeemPoints) {
+        throw new Error(`Insufficient loyalty points. Customer has ${currentPoints}, requested redemption of ${parsedRedeemPoints}.`);
+      }
+      pointsRedeemedValue = parsedRedeemPoints * parseFloat(shopSettings.loyalty_point_value);
+      
+      // Deduct points
+      await connection.query(
+        'UPDATE customers SET loyalty_points = loyalty_points - ? WHERE id = ? AND shop_id = ?',
+        [parsedRedeemPoints, customer_id, shopId]
+      );
+    }
+
+    const netAmount = calculatedTotal - parseFloat(discount) - pointsRedeemedValue;
+    const finalAmount = Math.max(0, netAmount) + parseFloat(tax) + parsedReduceDue;
 
     // Parse paid amount and compute due amount
     const paidAmount = req.body.paid_amount !== undefined ? parseFloat(req.body.paid_amount) : finalAmount;
@@ -102,11 +138,27 @@ router.post('/', authorize(['shop_admin', 'shop_staff']), async (req, res) => {
       throw new Error('Customer profile selection is required to record outstanding due balance.');
     }
 
-    // 4. Save transaction metadata in sales table (with paid and due amounts)
+    // Award loyalty points on net items spending
+    let pointsEarned = 0;
+    if (isLoyaltyEnabled && customer_id) {
+      const earnRate = parseFloat(shopSettings.loyalty_point_earn_rate) || 100.00;
+      const pointsEarningBasis = calculatedTotal - parseFloat(discount) - pointsRedeemedValue;
+      if (pointsEarningBasis > 0) {
+        pointsEarned = Math.floor(pointsEarningBasis / earnRate);
+      }
+      if (pointsEarned > 0) {
+        await connection.query(
+          'UPDATE customers SET loyalty_points = loyalty_points + ? WHERE id = ? AND shop_id = ?',
+          [pointsEarned, customer_id, shopId]
+        );
+      }
+    }
+
+    // 4. Save transaction metadata in sales table (with paid and due amounts and loyalty points)
     const [salesResult] = await connection.query(
-      `INSERT INTO sales (shop_id, customer_id, user_id, total_amount, discount, tax, final_amount, paid_amount, due_amount, payment_method) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [shopId, customer_id || null, userId, calculatedTotal, discount, tax, finalAmount, paidAmount, dueAmount, payment_method]
+      `INSERT INTO sales (shop_id, customer_id, user_id, total_amount, discount, tax, final_amount, paid_amount, due_amount, payment_method, points_earned, points_redeemed, points_redeemed_value) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [shopId, customer_id || null, userId, calculatedTotal, discount, tax, finalAmount, paidAmount, dueAmount, payment_method, pointsEarned, parsedRedeemPoints, pointsRedeemedValue]
     );
 
     const saleId = salesResult.insertId;
@@ -173,6 +225,7 @@ router.post('/', authorize(['shop_admin', 'shop_staff']), async (req, res) => {
       message: 'Transaction completed successfully.',
       sale_id: saleId,
       final_amount: finalAmount,
+      points_earned: pointsEarned,
       stock_alerts: stockAlerts // Returns products that hit low stock warnings
     });
 

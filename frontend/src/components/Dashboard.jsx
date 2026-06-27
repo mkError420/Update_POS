@@ -21,6 +21,8 @@ export default function Dashboard({ onNavigate = () => {} }) {
   const [tenantBreakdown, setTenantBreakdown] = useState([]);
   const [salesTrend, setSalesTrend] = useState([]);
   const [paymentBreakdown, setPaymentBreakdown] = useState([]);
+  const [topSelling, setTopSelling] = useState([]);
+  const [deadStock, setDeadStock] = useState([]);
   const [chartType, setChartType] = useState('revenue'); // 'revenue' or 'sales'
   const [hoveredPoint, setHoveredPoint] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -53,6 +55,12 @@ export default function Dashboard({ onNavigate = () => {} }) {
       }
       if (data.payment_method_breakdown) {
         setPaymentBreakdown(data.payment_method_breakdown);
+      }
+      if (data.top_selling) {
+        setTopSelling(data.top_selling);
+      }
+      if (data.dead_stock) {
+        setDeadStock(data.dead_stock);
       }
     } catch (err) {
       console.error(err);
@@ -789,6 +797,129 @@ export default function Dashboard({ onNavigate = () => {} }) {
         </div>
 
       </div>
+
+      {/* Product Performance Section */}
+      {!isSuperAdmin && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+          {/* Top Selling Products */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800">Top-Selling Products</h3>
+                <p className="text-xs text-slate-500">Products with the highest sales volume</p>
+              </div>
+              <span className="bg-indigo-50 text-indigo-750 text-[10px] font-bold px-2.5 py-1 rounded-lg border border-indigo-100 uppercase tracking-wider">
+                Fast Moving
+              </span>
+            </div>
+            
+            <div className="flex-1">
+              {topSelling.length === 0 ? (
+                <div className="h-48 flex flex-col items-center justify-center text-slate-400 text-sm bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
+                  <svg className="w-8 h-8 text-slate-300 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
+                  <span>No sales data recorded yet.</span>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {topSelling.map((prod, idx) => {
+                    const maxSold = topSelling[0]?.total_sold || 1;
+                    const pct = (prod.total_sold / maxSold) * 100;
+                    
+                    return (
+                      <div key={prod.id} className="space-y-1">
+                        <div className="flex justify-between text-sm font-semibold text-slate-800">
+                          <div className="flex items-center space-x-2 truncate pr-4">
+                            <span className="w-5 h-5 rounded-full bg-indigo-50 text-indigo-650 text-[10px] font-extrabold flex items-center justify-center flex-shrink-0">
+                              {idx + 1}
+                            </span>
+                            <span className="truncate text-slate-700 font-semibold" title={prod.name}>{prod.name}</span>
+                            <span className="text-[10px] text-slate-400 font-mono">({prod.sku})</span>
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <span className="font-bold text-slate-800">{prod.total_sold} {prod.unit || 'pcs'}</span>
+                            <span className="text-[10px] text-slate-400 block font-normal">৳{parseFloat(prod.total_revenue).toFixed(2)}</span>
+                          </div>
+                        </div>
+                        
+                        {/* Progress Bar */}
+                        <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                          <div 
+                            className="bg-indigo-500 h-full rounded-full transition-all duration-500" 
+                            style={{ width: `${pct}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Dead Stock / Unsold Items */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs flex flex-col">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <h3 className="text-lg font-bold text-slate-800">Dead Stock (Unsold Items)</h3>
+                <p className="text-xs text-slate-500">Products with stock but no transaction sales</p>
+              </div>
+              <span className="bg-rose-50 text-rose-700 text-[10px] font-bold px-2.5 py-1 rounded-lg border border-rose-100 uppercase tracking-wider">
+                Unsold Stock
+              </span>
+            </div>
+            
+            <div className="flex-1">
+              {deadStock.length === 0 ? (
+                <div className="h-48 flex flex-col items-center justify-center text-slate-400 text-sm bg-slate-50/50 rounded-xl border border-dashed border-slate-200">
+                  <svg className="w-8 h-8 text-emerald-500 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span>No dead stock found. All inventory is moving!</span>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50/50">
+                        <th className="p-2 pl-3">Product Name</th>
+                        <th className="p-2">SKU</th>
+                        <th className="p-2 text-center">Available Stock</th>
+                        <th className="p-2 text-right">Unit Price</th>
+                        <th className="p-2 text-right pr-3">Value Tied Up</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {deadStock.map((prod) => {
+                        const tiedUpValue = prod.stock_quantity * parseFloat(prod.price);
+                        
+                        return (
+                          <tr key={prod.id} className="hover:bg-rose-50/20 transition-colors">
+                            <td className="p-2.5 pl-3 font-semibold text-slate-700 max-w-[130px] truncate" title={prod.name}>
+                              {prod.name}
+                            </td>
+                            <td className="p-2.5 text-slate-550 font-mono text-[10px]">{prod.sku}</td>
+                            <td className="p-2.5 text-center font-bold text-slate-800">
+                              {prod.stock_quantity} {prod.unit || 'pcs'}
+                            </td>
+                            <td className="p-2.5 text-right text-slate-600 font-medium">
+                              ৳{parseFloat(prod.price).toFixed(2)}
+                            </td>
+                            <td className="p-2.5 text-right pr-3 font-extrabold text-rose-650">
+                              ৳{tiedUpValue.toFixed(2)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
